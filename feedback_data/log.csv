@@ -1,0 +1,13 @@
+timestamp,image_filename,predicted_class,predicted_confidence,was_correct,corrected_class
+1783090894,Delik_1783090894.jpg,Delik,0.652,True,
+1783090934,Delik_1783090934.jpg,Delik,0.9324,True,
+1783090947,Jut_1783090947.jpg,Jut,0.7416,True,
+1783090961,good_1783090961.jpg,good,,True,
+1783090977,Jut_1783090977.jpg,Jut,0.7426,True,
+1783090989,good_1783090989.jpg,good,,True,
+1783091003,Leke_1783091003.jpg,Leke,0.6548,True,
+1783091019,Jut_1783091019.jpg,Jut,0.7365,True,
+1783091045,good_1783091045.jpg,good,,False,misregistration
+1783091068,Leke_1783091068.jpg,Leke,0.5989,True,
+1783091080,Leke_1783091080.jpg,Leke,0.7932,True,
+1783091135,Leke_1783091135.jpg,Leke,0.8556,False,ink_bleed
