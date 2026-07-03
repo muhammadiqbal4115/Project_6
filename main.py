@@ -372,10 +372,6 @@ def upload_mode(model):
 
 
 def live_camera_mode(model):
-    st.caption(
-        "Click **Start** and allow camera access in your browser. "
-        "On a phone, open this app's URL directly in your phone's browser."
-    )
 
     ctx = webrtc_streamer(
         key="defect-detection-live",
