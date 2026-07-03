@@ -560,18 +560,29 @@ def upload_mode(model):
             use_container_width=True,
         )
 
-    if status == "GOOD":
 
-        st.success(
-            f"STATUS: GOOD ({top_conf*100:.1f}%)"
-        )
+        if status == "GOOD":
 
-    else:
+            st.success(
+                "STATUS: GOOD"
+                + (
+                    f" ({top_conf*100:.1f}% confidence)"
+                    if top_conf is not None
+                    else ""
+                )
+            )
 
-        st.error(
-            f"STATUS: DEFECTIVE - {top_class} "
-            f"({top_conf*100:.1f}%)"
-        )
+        else:
+
+            st.error(
+                f"STATUS: DEFECTIVE - {top_class}"
+                + (
+                    f" ({top_conf*100:.1f}% confidence)"
+                    if top_conf is not None
+                    else ""
+                )
+            )
+
 
     render_feedback_controls(
         image_bgr,
@@ -683,18 +694,30 @@ def live_camera_mode(model):
             use_container_width=True,
         )
 
+
         if status == "GOOD":
 
             st.success(
-                f"STATUS: GOOD ({top_conf*100:.1f}%)"
+                "STATUS: GOOD"
+                + (
+                    f" ({top_conf*100:.1f}% confidence)"
+                    if top_conf is not None
+                    else ""
+                )
             )
 
         else:
 
             st.error(
-                f"STATUS: DEFECTIVE - {top_class} "
-                f"({top_conf*100:.1f}%)"
+                f"STATUS: DEFECTIVE - {top_class}"
+                + (
+                    f" ({top_conf*100:.1f}% confidence)"
+                    if top_conf is not None
+                    else ""
+                )
             )
+
+
 
         render_feedback_controls(
             frame,
