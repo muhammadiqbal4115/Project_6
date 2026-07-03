@@ -1,8 +1,3 @@
-"""
-MAIN APPLICATION: Garment Print Defect Detection — Streamlit UI
-FIXED VERSION FOR LIVE CAMERA
-"""
-
 import os
 import asyncio
 import logging
@@ -24,12 +19,14 @@ from streamlit_webrtc import (
 )
 from ultralytics import YOLO
 
-from utils.feedback_logger import save_feedback, get_feedback_stats
+from utils.feedback_logger import (
+    save_feedback,
+    get_feedback_stats,
+)
 
-
-# ============================================================================
-# FIX WEBRTC / AIOICE CRASHES
-# ============================================================================
+# -------------------------------------------------------------------
+# LOGGING FIXES
+# -------------------------------------------------------------------
 
 os.environ["AIOICE_LOG_LEVEL"] = "CRITICAL"
 
@@ -38,22 +35,23 @@ logging.getLogger("aioice.ice").setLevel(logging.CRITICAL)
 logging.getLogger("aiortc").setLevel(logging.CRITICAL)
 logging.getLogger("asyncio").setLevel(logging.CRITICAL)
 
+# -------------------------------------------------------------------
+# ASYNCIO ERROR FILTER
+# -------------------------------------------------------------------
 
-def silence_known_errors(loop, context):
-    """
-    Ignore harmless WebRTC teardown errors.
-    """
+
+def _silence_known_teardown_errors(loop, context):
 
     exc = context.get("exception")
+
     message = context.get("message", "")
 
     if isinstance(exc, AttributeError):
-        txt = str(exc)
 
-        if "sendto" in txt:
+        if "sendto" in str(exc):
             return
 
-        if "call_exception_handler" in txt:
+        if "call_exception_handler" in str(exc):
             return
 
     if "Task was destroyed but it is pending" in message:
@@ -62,20 +60,25 @@ def silence_known_errors(loop, context):
     loop.default_exception_handler(context)
 
 
-def install_asyncio_handler():
+def _install_exception_handler_on_current_loop():
+
     try:
+
         loop = asyncio.get_event_loop()
-        loop.set_exception_handler(silence_known_errors)
+
+        loop.set_exception_handler(
+            _silence_known_teardown_errors
+        )
+
     except RuntimeError:
         pass
 
 
-install_asyncio_handler()
+_install_exception_handler_on_current_loop()
 
-
-# ============================================================================
+# -------------------------------------------------------------------
 # CONFIG
-# ============================================================================
+# -------------------------------------------------------------------
 
 MODEL_PATH = "model/best.pt"
 
@@ -83,17 +86,44 @@ CONFIDENCE_THRESHOLD = 0.5
 
 GOOD_CLASS_NAME = "good"
 
-COLOR_GOOD = (0, 255, 0)
+SAMPLE_IMAGES_DIR = Path("sample_images")
+
+COLOR_GOOD = (0, 200, 0)
+
 COLOR_DEFECT = (0, 0, 255)
 
-# IMPORTANT:
-# Empty ICE servers = avoids STUN retry crashes
+# -------------------------------------------------------------------
+# STABLE RTC CONFIGURATION
+# -------------------------------------------------------------------
+
 RTC_CONFIGURATION = RTCConfiguration(
     {
-        "iceServers": [],
+        "iceServers": [
+            {
+                "urls": [
+                    "stun:stun.l.google.com:19302",
+                    "stun:stun1.l.google.com:19302",
+                ]
+            }
+        ],
         "iceTransportPolicy": "all",
     }
 )
+
+# -------------------------------------------------------------------
+# SAMPLE IMAGES
+# -------------------------------------------------------------------
+
+SAMPLE_IMAGES = [
+    {"file": "sample1.jpg", "caption": "Delik"},
+    {"file": "sample2.jpg", "caption": "Delik"},
+    {"file": "sample3.jpg", "caption": "Jut"},
+    {"file": "sample4.jpg", "caption": "Leke"},
+]
+
+# -------------------------------------------------------------------
+# DEFECT CLASSES
+# -------------------------------------------------------------------
 
 DEFECT_CLASSES = [
     "good",
@@ -109,10 +139,19 @@ DEFECT_CLASSES = [
     "low_opacity",
 ]
 
+# -------------------------------------------------------------------
+# PAGE CONFIG
+# -------------------------------------------------------------------
 
-# ============================================================================
-# MODEL
-# ============================================================================
+st.set_page_config(
+    page_title="Garment Print Defect Detection",
+    layout="wide",
+)
+
+# -------------------------------------------------------------------
+# LOAD MODEL
+# -------------------------------------------------------------------
+
 
 @st.cache_resource
 def load_model():
@@ -122,16 +161,23 @@ def load_model():
 
     return YOLO(MODEL_PATH)
 
-
-# ============================================================================
+# -------------------------------------------------------------------
 # IMAGE HELPERS
-# ============================================================================
+# -------------------------------------------------------------------
+
 
 def pil_to_cv2(img: Image.Image):
 
     arr = np.array(img.convert("RGB"))
 
-    return cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+    return cv2.cvtColor(
+        arr,
+        cv2.COLOR_RGB2BGR,
+    )
+
+# -------------------------------------------------------------------
+# RUN INFERENCE
+# -------------------------------------------------------------------
 
 
 def run_inference(model, image_bgr):
@@ -139,7 +185,7 @@ def run_inference(model, image_bgr):
     results = model(
         image_bgr,
         conf=CONFIDENCE_THRESHOLD,
-        verbose=False
+        verbose=False,
     )
 
     annotated = results[0].plot()
@@ -157,6 +203,7 @@ def run_inference(model, image_bgr):
     if boxes is not None and len(boxes) > 0:
 
         confs = []
+
         names = []
 
         for box in boxes:
@@ -165,7 +212,10 @@ def run_inference(model, image_bgr):
 
             conf = float(box.conf[0])
 
-            name = class_names.get(cls_id, str(cls_id))
+            name = class_names.get(
+                cls_id,
+                str(cls_id),
+            )
 
             confs.append(conf)
 
@@ -183,10 +233,25 @@ def run_inference(model, image_bgr):
             else "DEFECTIVE"
         )
 
-    return status, top_class, top_conf, annotated
+    return (
+        status,
+        top_class,
+        top_conf,
+        annotated,
+    )
+
+# -------------------------------------------------------------------
+# DRAW STATUS BAR
+# -------------------------------------------------------------------
 
 
-def draw_status_bar(frame, status, top_class, conf, fps):
+def draw_status_bar(
+    frame,
+    status,
+    top_class,
+    conf,
+    fps,
+):
 
     h, w = frame.shape[:2]
 
@@ -208,20 +273,26 @@ def draw_status_bar(frame, status, top_class, conf, fps):
         0,
     )
 
-    color = COLOR_GOOD if status == "GOOD" else COLOR_DEFECT
+    color = (
+        COLOR_GOOD
+        if status == "GOOD"
+        else COLOR_DEFECT
+    )
 
     text = f"STATUS: {status}"
 
     if status == "DEFECTIVE":
+
         text += f" ({top_class})"
 
     if conf is not None:
-        text += f"  {conf*100:.0f}%"
+
+        text += f" {conf*100:.0f}%"
 
     cv2.putText(
         frame,
         text,
-        (10, 28),
+        (12, 28),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.7,
         color,
@@ -231,7 +302,7 @@ def draw_status_bar(frame, status, top_class, conf, fps):
     cv2.putText(
         frame,
         f"FPS: {fps:.1f}",
-        (10, 52),
+        (12, 50),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.5,
         (255, 255, 255),
@@ -240,10 +311,10 @@ def draw_status_bar(frame, status, top_class, conf, fps):
 
     return frame
 
-
-# ============================================================================
+# -------------------------------------------------------------------
 # VIDEO PROCESSOR
-# ============================================================================
+# -------------------------------------------------------------------
+
 
 class DefectVideoProcessor:
 
@@ -261,31 +332,39 @@ class DefectVideoProcessor:
 
         self.latest_conf = None
 
-        self.prev_time = time.time()
+        self._prev_time = time.time()
 
-        self.handler_installed = False
+        self._handler_installed = False
 
     def recv(self, frame):
 
-        # Install asyncio handler inside WebRTC thread
-        if not self.handler_installed:
+        if not self._handler_installed:
 
-            install_asyncio_handler()
+            _install_exception_handler_on_current_loop()
 
-            self.handler_installed = True
+            self._handler_installed = True
 
         img = frame.to_ndarray(format="bgr24")
 
-        status, top_class, top_conf, annotated = run_inference(
+        (
+            status,
+            top_class,
+            top_conf,
+            annotated,
+        ) = run_inference(
             self.model,
             img,
         )
 
         now = time.time()
 
-        fps = 1.0 / (now - self.prev_time)
+        fps = (
+            1.0 / (now - self._prev_time)
+            if now != self._prev_time
+            else 0.0
+        )
 
-        self.prev_time = now
+        self._prev_time = now
 
         annotated = draw_status_bar(
             annotated,
@@ -307,71 +386,296 @@ class DefectVideoProcessor:
 
         return av.VideoFrame.from_ndarray(
             annotated,
-            format="bgr24"
+            format="bgr24",
         )
 
+# -------------------------------------------------------------------
+# SAMPLE IMAGES SECTION
+# -------------------------------------------------------------------
 
-# ============================================================================
-# LIVE CAMERA MODE
-# ============================================================================
 
-def live_camera_mode(model):
+def sample_images_section():
 
-    st.subheader("📷 Live Camera")
+    st.subheader("📷 Sample Images")
 
-    st.caption(
-        "Click START and allow browser camera permission."
-    )
+    cols = st.columns(4)
 
-    ctx = webrtc_streamer(
-        key="live-camera",
-        mode=WebRtcMode.SENDRECV,
-        rtc_configuration=RTC_CONFIGURATION,
-        media_stream_constraints={
-            "video": True,
-            "audio": False,
-        },
-        video_processor_factory=lambda:
-            DefectVideoProcessor(model),
-        async_processing=True,
-    )
+    for col, img in zip(cols, SAMPLE_IMAGES):
 
-    # IMPORTANT FIX
-    if ctx.state.playing:
+        img_path = SAMPLE_IMAGES_DIR / img["file"]
 
-        st.success("Camera running")
+        with col:
 
-    else:
+            if img_path.exists():
 
-        st.info("Click START to begin")
+                st.image(
+                    str(img_path),
+                    caption=img["caption"],
+                    use_container_width=True,
+                )
+
+                with open(img_path, "rb") as f:
+
+                    img_bytes = f.read()
+
+                st.download_button(
+                    label="⬇️ Download",
+                    data=img_bytes,
+                    file_name=img["file"],
+                    mime="image/jpeg",
+                    key=f"download_{img['file']}",
+                    use_container_width=True,
+                )
+
+# -------------------------------------------------------------------
+# FEEDBACK CONTROLS
+# -------------------------------------------------------------------
+
+
+def render_feedback_controls(
+    image_bgr,
+    top_class,
+    top_conf,
+    key_prefix,
+):
+
+    state_key = f"feedback_done_{key_prefix}"
+
+    if state_key not in st.session_state:
+
+        st.session_state[state_key] = False
+
+    if st.session_state[state_key]:
+
+        st.success("Feedback recorded.")
 
         return
 
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        if st.button(
+            "👍 Correct",
+            key=f"correct_{key_prefix}",
+            use_container_width=True,
+        ):
+
+            save_feedback(
+                image_bgr,
+                top_class,
+                top_conf,
+                was_correct=True,
+            )
+
+            st.session_state[state_key] = True
+
+            st.rerun()
+
+    with col2:
+
+        if st.button(
+            "👎 Incorrect",
+            key=f"incorrect_{key_prefix}",
+            use_container_width=True,
+        ):
+
+            corrected = st.selectbox(
+                "Correct label",
+                DEFECT_CLASSES,
+                key=f"select_{key_prefix}",
+            )
+
+            if st.button(
+                "Submit",
+                key=f"submit_{key_prefix}",
+            ):
+
+                save_feedback(
+                    image_bgr,
+                    top_class,
+                    top_conf,
+                    was_correct=False,
+                    corrected_class=corrected,
+                )
+
+                st.session_state[state_key] = True
+
+                st.rerun()
+
+# -------------------------------------------------------------------
+# UPLOAD MODE
+# -------------------------------------------------------------------
+
+
+def upload_mode(model):
+
+    uploaded_file = st.file_uploader(
+        "Upload shirt print image",
+        type=["jpg", "jpeg", "png"],
+    )
+
+    if uploaded_file is None:
+
+        st.info("Upload an image.")
+
+        return
+
+    image = Image.open(uploaded_file)
+
+    image_bgr = pil_to_cv2(image)
+
+    with st.spinner("Running detection..."):
+
+        (
+            status,
+            top_class,
+            top_conf,
+            annotated_bgr,
+        ) = run_inference(
+            model,
+            image_bgr,
+        )
+
+    annotated_rgb = cv2.cvtColor(
+        annotated_bgr,
+        cv2.COLOR_BGR2RGB,
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        st.image(
+            image,
+            caption="Original",
+            use_container_width=True,
+        )
+
+    with col2:
+
+        st.image(
+            annotated_rgb,
+            caption="Detection Result",
+            use_container_width=True,
+        )
+
+    if status == "GOOD":
+
+        st.success(
+            f"STATUS: GOOD ({top_conf*100:.1f}%)"
+        )
+
+    else:
+
+        st.error(
+            f"STATUS: DEFECTIVE - {top_class} "
+            f"({top_conf*100:.1f}%)"
+        )
+
+    render_feedback_controls(
+        image_bgr,
+        top_class,
+        top_conf,
+        key_prefix="upload",
+    )
+
+# -------------------------------------------------------------------
+# LIVE CAMERA MODE
+# -------------------------------------------------------------------
+
+
+def live_camera_mode(model):
+
+    st.caption(
+        "Click START and allow browser camera access."
+    )
+
+    ctx = webrtc_streamer(
+        key="defect-detection-live",
+
+        mode=WebRtcMode.SENDRECV,
+
+        rtc_configuration=RTC_CONFIGURATION,
+
+        media_stream_constraints={
+            "video": {
+                "width": {"ideal": 1280},
+                "height": {"ideal": 720},
+                "frameRate": {"ideal": 30},
+            },
+            "audio": False,
+        },
+
+        video_processor_factory=lambda:
+            DefectVideoProcessor(model),
+
+        async_processing=False,
+    )
+
     st.divider()
 
-    if st.button("📸 Capture Current Frame"):
+    if ctx.state.playing:
 
-        if ctx.video_processor is None:
+        st.success("✅ Camera connected")
 
-            st.warning("Camera not ready yet")
+    else:
+
+        st.info("▶️ Click START above")
+
+        return
+
+    st.subheader("Capture current frame")
+
+    if ctx.video_processor is None:
+
+        st.warning("Waiting for frames...")
+
+        return
+
+    if st.button("📸 Capture current frame"):
+
+        try:
+
+            with ctx.video_processor.lock:
+
+                frame = ctx.video_processor.latest_frame_bgr
+
+                status = ctx.video_processor.latest_status
+
+                top_class = ctx.video_processor.latest_class
+
+                top_conf = ctx.video_processor.latest_conf
+
+            if frame is None:
+
+                st.warning("No frame available yet.")
+
+                return
+
+            st.session_state["captured_frame"] = frame
+
+            st.session_state["captured_status"] = status
+
+            st.session_state["captured_class"] = top_class
+
+            st.session_state["captured_conf"] = top_conf
+
+        except Exception as e:
+
+            st.error(f"Capture failed: {e}")
 
             return
 
-        with ctx.video_processor.lock:
+    if "captured_frame" in st.session_state:
 
-            frame = ctx.video_processor.latest_frame_bgr
+        frame = st.session_state["captured_frame"]
 
-            status = ctx.video_processor.latest_status
+        status = st.session_state["captured_status"]
 
-            top_class = ctx.video_processor.latest_class
+        top_class = st.session_state["captured_class"]
 
-            top_conf = ctx.video_processor.latest_conf
-
-        if frame is None:
-
-            st.warning("No frame captured yet")
-
-            return
+        top_conf = st.session_state["captured_conf"]
 
         st.image(
             cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
@@ -382,8 +686,7 @@ def live_camera_mode(model):
         if status == "GOOD":
 
             st.success(
-                f"STATUS: GOOD "
-                f"({top_conf*100:.1f}%)"
+                f"STATUS: GOOD ({top_conf*100:.1f}%)"
             )
 
         else:
@@ -393,31 +696,73 @@ def live_camera_mode(model):
                 f"({top_conf*100:.1f}%)"
             )
 
+        render_feedback_controls(
+            frame,
+            top_class,
+            top_conf,
+            key_prefix="live",
+        )
 
-# ============================================================================
+# -------------------------------------------------------------------
 # MAIN
-# ============================================================================
+# -------------------------------------------------------------------
+
 
 def main():
-
-    st.set_page_config(
-        page_title="Garment Print Defect Detection",
-        layout="wide",
-    )
 
     st.title("🧵 Garment Print Defect Detection")
 
     model = load_model()
 
-    if model is None:
+    with st.sidebar:
 
-        st.error(f"Model not found: {MODEL_PATH}")
+        st.header("Model Status")
 
-        return
+        if model is None:
+
+            st.error(
+                f"No model found at {MODEL_PATH}"
+            )
+
+            return
+
+        st.success("Model loaded")
+
+        st.header("Feedback Stats")
+
+        stats = get_feedback_stats()
+
+        st.metric("Total", stats["total"])
+
+        col1, col2 = st.columns(2)
+
+        col1.metric("Correct", stats["correct"])
+
+        col2.metric("Incorrect", stats["incorrect"])
+
+        st.header("Retraining")
+
+        if st.button(
+            "🔁 Run Retraining",
+            use_container_width=True,
+        ):
+
+            with st.spinner("Running retraining..."):
+
+                result = subprocess.run(
+                    ["python", "retrain_from_feedback.py"],
+                    capture_output=True,
+                    text=True,
+                )
+
+            st.code(
+                result.stdout + result.stderr
+            )
 
     mode = st.radio(
-        "Select Mode",
+        "Modes",
         [
+            "Sample Images",
             "Upload Image",
             "Live Camera",
         ],
@@ -426,10 +771,25 @@ def main():
 
     st.divider()
 
-    if mode == "Live Camera":
+    if model is None:
+
+        st.warning("No trained model available.")
+
+        return
+
+    if mode == "Sample Images":
+
+        sample_images_section()
+
+    elif mode == "Upload Image":
+
+        upload_mode(model)
+
+    else:
 
         live_camera_mode(model)
 
 
 if __name__ == "__main__":
+
     main()
